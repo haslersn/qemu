@@ -1528,6 +1528,27 @@ is sent by the front-end.
 
   The state.num field is currently reserved and must be set to 0.
 
+``VHOST_USER_BACKEND_FS_MAP``
+  :id: 6
+  :equivalent ioctl: N/A
+  :backend payload: ``struct VhostUserFSBackendMsg``
+  :master payload: N/A
+
+  Requests that an fd, provided in the ancillary data, be mmapped
+  into the virtio-fs cache; multiple chunks can be mapped in one
+  command.
+  A reply is generated indicating whether mapping succeeded.
+
+``VHOST_USER_BACKEND_FS_UNMAP``
+  :id: 7
+  :equivalent ioctl: N/A
+  :backend payload: ``struct VhostUserFSBackendMsg``
+  :master payload: N/A
+
+  Requests that the range in the virtio-fs cache is unmapped;
+  multiple chunks can be unmapped in one command.
+  A reply is generated indicating whether unmapping succeeded.
+
 .. _reply_ack:
 
 VHOST_USER_PROTOCOL_F_REPLY_ACK

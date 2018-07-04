@@ -47,6 +47,20 @@ static const int user_feature_bits[] = {
 #define DAX_WINDOW_PROT PROT_NONE
 #endif
 
+int vhost_user_fs_backend_map(struct vhost_dev *dev,
+                              const VhostUserFSBackendMsg *msg, int fd)
+{
+    /* TODO */
+    return -EBUSY;
+}
+
+int vhost_user_fs_backend_unmap(struct vhost_dev *dev,
+                                const VhostUserFSBackendMsg *msg)
+{
+    /* TODO */
+    return -EBUSY;
+}
+
 static void vuf_get_config(VirtIODevice *vdev, uint8_t *config)
 {
     VHostUserFS *fs = VHOST_USER_FS(vdev);

@@ -13,6 +13,7 @@
 #include "hw/virtio/vhost.h"
 #include "hw/virtio/virtio-crypto.h"
 #include "hw/virtio/vhost-user.h"
+#include "hw/virtio/vhost-user-fs.h"
 #include "hw/virtio/vhost-backend.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-net.h"
@@ -129,6 +130,10 @@ typedef enum VhostUserBackendRequest {
     VHOST_USER_BACKEND_IOTLB_MSG = 1,
     VHOST_USER_BACKEND_CONFIG_CHANGE_MSG = 2,
     VHOST_USER_BACKEND_VRING_HOST_NOTIFIER_MSG = 3,
+    VHOST_USER_BACKEND_VRING_CALL = 4,
+    VHOST_USER_BACKEND_VRING_ERR = 5,
+    VHOST_USER_BACKEND_FS_MAP = 6,
+    VHOST_USER_BACKEND_FS_UNMAP = 7,
     VHOST_USER_BACKEND_MAX
 }  VhostUserBackendRequest;
 
@@ -226,6 +231,7 @@ typedef union {
         VhostUserCryptoSession session;
         VhostUserVringArea area;
         VhostUserInflight inflight;
+        VhostUserFSBackendMsg fs_backend_msg;
 } VhostUserPayload;
 
 typedef struct VhostUserMsg {
@@ -1658,6 +1664,15 @@ static gboolean backend_read(QIOChannel *ioc, GIOCondition condition,
         ret = vhost_user_backend_handle_vring_host_notifier(dev, &payload.area,
                                                           fd ? fd[0] : -1);
         break;
+#ifdef CONFIG_VHOST_USER_FS
+    case VHOST_USER_BACKEND_FS_MAP:
+        ret = vhost_user_fs_backend_map(dev, &payload.fs_backend_msg,
+                                        fd ? fd[0] : -1);
+        break;
+    case VHOST_USER_BACKEND_FS_UNMAP:
+        ret = vhost_user_fs_backend_unmap(dev, &payload.fs_backend_msg);
+        break;
+#endif
     default:
         error_report("Received unexpected msg type: %d.", hdr.request);
         ret = -EINVAL;
