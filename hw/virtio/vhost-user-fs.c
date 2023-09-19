@@ -104,6 +104,122 @@ static void debug_backend_msg(const char *desc,
     }
 }
 
+/*
+ * Writes a pointer to the DAX cache (in host virtual address space) to
+ * *cache_host and the cache's size to *cache_size.
+ */
+static int get_cache(struct vhost_dev *dev,
+                     void **cache_host, size_t *cache_size)
+{
+    VHostUserFS *fs = VHOST_USER_FS(dev->vdev);
+    *cache_size = fs->conf.cache_size;
+    if (!cache_size) {
+        error_report("map/unmap called when DAX cache not present");
+        return -ENOENT;
+    }
+    *cache_host = memory_region_get_ram_ptr(&fs->cache);
+    return 0;
+}
+
+/*
+ * Carries out the map operations from msg and returns on the first error.
+ * cache_host must be a pointer to the DAX cache in host virtual address space.
+ */
+static int map_in_cache(void *cache_host, size_t cache_size,
+                        const VhostUserFSBackendMsg *msg, int fd)
+{
+    int i, res = 0;
+    uint64_t e_fd_offset, e_cache_offset, e_len, e_flags;
+    void *ptr;
+
+    if (fd < 0) {
+        error_report("map called with bad FD");
+        return -EBADF;
+    }
+
+    for (i = 0; i < VHOST_USER_FS_BACKEND_ENTRIES; ++i) {
+        e_len = msg->len[i];
+        if (!e_len) {
+            continue;
+        }
+        e_fd_offset = msg->fd_offset[i];
+        e_cache_offset = msg->cache_offset[i];
+        e_flags = msg->flags[i];
+
+        if ((e_cache_offset + e_len) < e_len /* <- checks for overflow */ ||
+            (e_cache_offset + e_len) > cache_size) {
+            res = -EINVAL;
+            error_report("map [%d]: bad cache_offset+len 0x%" PRIx64 "+0x%"
+                         PRIx64,
+                         i, e_cache_offset, e_len);
+            break;
+        }
+
+        ptr = mmap(cache_host + e_cache_offset, e_len,
+                   ((e_flags & VHOST_USER_FS_FLAG_MAP_R) ? PROT_READ : 0) |
+                   ((e_flags & VHOST_USER_FS_FLAG_MAP_W) ? PROT_WRITE : 0),
+                   MAP_SHARED | MAP_FIXED, fd, e_fd_offset);
+
+        if (ptr != cache_host + e_cache_offset) {
+            res = -errno;
+            error_report("map [%d] failed with error %s", i, strerror(errno));
+            break;
+        }
+    }
+
+    return res;
+}
+
+/*
+ * Carries out the unmap operations from in msg. On error, the remaining
+ * operations are tried anyway. Only the last error is returned.
+ * cache_host must be a pointer to the DAX cache in host virtual address space.
+ */
+static int unmap_in_cache(void *cache_host, size_t cache_size,
+                          const VhostUserFSBackendMsg *msg)
+{
+    int i, res = 0;
+    uint64_t e_cache_offset, e_len;
+    void *ptr;
+
+    /*
+     * Note even if one unmap fails we try the rest, since the intended effect
+     * is to clean up as much as possible.
+     */
+    for (i = 0; i < VHOST_USER_FS_BACKEND_ENTRIES && msg->len[i]; ++i) {
+        e_len = msg->len[i];
+        if (!e_len) {
+            continue;
+        }
+        e_cache_offset = msg->cache_offset[i];
+
+        if (e_len == ~(uint64_t)0) {
+            /* Special case meaning the whole arena */
+            e_len = cache_size;
+        }
+
+        if ((e_cache_offset + e_len) < e_len /* <- checks for overflow */ ||
+            (e_cache_offset + e_len) > cache_size) {
+            res = -EINVAL;
+            error_report("unmap [%d]: bad cache_offset+len 0x%" PRIx64 "+0x%"
+                         PRIx64,
+                         i, e_cache_offset, e_len);
+            continue;
+        }
+
+        ptr = mmap(cache_host + e_cache_offset, e_len, DAX_WINDOW_PROT,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+        if (ptr != cache_host + e_cache_offset) {
+            res = -errno;
+            error_report("unmap [%d]: failed with error %s",
+                         i, strerror(errno));
+        }
+    }
+
+    return res;
+}
+
 int vhost_user_fs_backend_map(struct vhost_dev *dev,
                               const VhostUserFSBackendMsg *msg, int fd)
 {
@@ -111,8 +227,19 @@ int vhost_user_fs_backend_map(struct vhost_dev *dev,
     debug_backend_msg("vhost_user_fs_backend_map", msg, &fd);
     #endif
 
-    /* TODO */
-    return -EBUSY;
+    size_t cache_size;
+    void *cache_host;
+    int res = get_cache(dev, &cache_host, &cache_size);
+    if (res) {
+        return res;
+    }
+
+    res = map_in_cache(cache_host, cache_size, msg, fd);
+    if (res) {
+        /* Something went wrong, unmap them all */
+        unmap_in_cache(cache_host, cache_size, msg);
+    }
+    return res;
 }
 
 int vhost_user_fs_backend_unmap(struct vhost_dev *dev,
@@ -122,8 +249,14 @@ int vhost_user_fs_backend_unmap(struct vhost_dev *dev,
     debug_backend_msg("vhost_user_fs_backend_unmap", msg, NULL);
     #endif
 
-    /* TODO */
-    return -EBUSY;
+    size_t cache_size;
+    void *cache_host;
+    int res = get_cache(dev, &cache_host, &cache_size);
+    if (res) {
+        return res;
+    }
+
+    return unmap_in_cache(cache_host, cache_size, msg);
 }
 
 static void vuf_get_config(VirtIODevice *vdev, uint8_t *config)
