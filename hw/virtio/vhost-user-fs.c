@@ -47,9 +47,70 @@ static const int user_feature_bits[] = {
 #define DAX_WINDOW_PROT PROT_NONE
 #endif
 
+/* Outputs debug information about a backend message to stdout */
+static void debug_backend_msg(const char *desc,
+                              const VhostUserFSBackendMsg *msg, const int* fd)
+{
+    unsigned int i;
+    bool flag_seen = false;
+    uint64_t e_fd_offset, e_cache_offset, e_len, e_flags;
+
+    /* Output description */
+    if (desc != NULL) {
+        printf("%s", desc);
+    }
+    if (fd) {
+        printf(" (fd=%d)", *fd);
+    }
+    printf(":\n");
+
+    /* Output message content */
+    for (i = 0; i < VHOST_USER_FS_BACKEND_ENTRIES; ++i) {
+        e_len = msg->len[i];
+        if (!e_len) {
+            continue;
+        }
+        e_fd_offset = msg->fd_offset[i];
+        e_cache_offset = msg->cache_offset[i];
+        e_flags = msg->flags[i];
+
+        printf("[%d]: fd_offset=0x%" PRIx64 ", cache_offset=0x%" PRIx64
+               ", len=0x%" PRIx64 ", flags=",
+               i, e_fd_offset, e_cache_offset, e_len);
+        if (e_flags & VHOST_USER_FS_FLAG_MAP_R) {
+            printf("MAP_R");
+            e_flags &= ~VHOST_USER_FS_FLAG_MAP_R;
+            flag_seen = true;
+        }
+        if (e_flags & VHOST_USER_FS_FLAG_MAP_W) {
+            if (flag_seen) {
+                printf("|");
+            }
+            printf("MAP_W");
+            e_flags &= ~VHOST_USER_FS_FLAG_MAP_W;
+            flag_seen = true;
+        }
+        if (e_flags) {
+            if (flag_seen) {
+                printf("|");
+            }
+            printf("0x%lx", e_flags);
+            flag_seen = true;
+        }
+        if (!flag_seen) {
+            printf("EMPTY");
+        }
+        printf("\n");
+    }
+}
+
 int vhost_user_fs_backend_map(struct vhost_dev *dev,
                               const VhostUserFSBackendMsg *msg, int fd)
 {
+    #ifdef DEBUG_VHOST_USER_FS
+    debug_backend_msg("vhost_user_fs_backend_map", msg, &fd);
+    #endif
+
     /* TODO */
     return -EBUSY;
 }
@@ -57,6 +118,10 @@ int vhost_user_fs_backend_map(struct vhost_dev *dev,
 int vhost_user_fs_backend_unmap(struct vhost_dev *dev,
                                 const VhostUserFSBackendMsg *msg)
 {
+    #ifdef DEBUG_VHOST_USER_FS
+    debug_backend_msg("vhost_user_fs_backend_unmap", msg, NULL);
+    #endif
+
     /* TODO */
     return -EBUSY;
 }
